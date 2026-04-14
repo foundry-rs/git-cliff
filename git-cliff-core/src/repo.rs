@@ -8,13 +8,13 @@ use git2::{
     Worktree,
 };
 use glob::Pattern;
-use indexmap::IndexMap;
 use regex::Regex;
 use url::Url;
 
 use crate::config::Remote;
 use crate::error::{Error, Result};
 use crate::tag::Tag;
+use crate::tagged::TaggedCommits;
 
 /// Regex for replacing the signature part of a tag message.
 static TAG_SIGNATURE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
@@ -300,8 +300,8 @@ impl Repository {
                 changed_files.iter().any(|path| {
                     include_pattern
                         .iter()
-                        .any(|pattern| pattern.matches_path(path)) &&
-                        !exclude_pattern
+                        .any(|pattern| pattern.matches_path(path))
+                        && !exclude_pattern
                             .iter()
                             .any(|pattern| pattern.matches_path(path))
                 })
@@ -483,8 +483,8 @@ impl Repository {
     fn should_include_tag(&self, head_commit: &Commit, tag_commit: &Commit) -> Result<bool> {
         Ok(self
             .inner
-            .graph_descendant_of(head_commit.id(), tag_commit.id())? ||
-            head_commit.id() == tag_commit.id())
+            .graph_descendant_of(head_commit.id(), tag_commit.id())?
+            || head_commit.id() == tag_commit.id())
     }
 
     /// Parses and returns a commit-tag map.
@@ -495,7 +495,7 @@ impl Repository {
         pattern: &Option<Regex>,
         topo_order: bool,
         use_branch_tags: bool,
-    ) -> Result<IndexMap<String, Tag>> {
+    ) -> Result<TaggedCommits<'_>> {
         let mut tags: Vec<(Commit, Tag)> = Vec::new();
         let tag_names = self.inner.tag_names(None)?;
         let head_commit = self.inner.head()?.peel_to_commit()?;
@@ -511,10 +511,13 @@ impl Repository {
                     continue;
                 }
 
-                tags.push((commit, Tag {
-                    name,
-                    message: None,
-                }));
+                tags.push((
+                    commit,
+                    Tag {
+                        name,
+                        message: None,
+                    },
+                ));
             } else if let Some(tag) = obj.as_tag() {
                 if let Some(commit) = tag
                     .target()
@@ -524,22 +527,22 @@ impl Repository {
                     if use_branch_tags && !self.should_include_tag(&head_commit, &commit)? {
                         continue;
                     }
-                    tags.push((commit, Tag {
-                        name: tag.name().map(String::from).unwrap_or(name),
-                        message: tag
-                            .message()
-                            .map(|msg| TAG_SIGNATURE_REGEX.replace(msg, "").trim().to_owned()),
-                    }));
+                    tags.push((
+                        commit,
+                        Tag {
+                            name: tag.name().map(String::from).unwrap_or(name),
+                            message: tag
+                                .message()
+                                .map(|msg| TAG_SIGNATURE_REGEX.replace(msg, "").trim().to_owned()),
+                        },
+                    ));
                 }
             }
         }
         if !topo_order {
             tags.sort_by(|a, b| a.0.time().seconds().cmp(&b.0.time().seconds()));
         }
-        Ok(tags
-            .into_iter()
-            .map(|(a, b)| (a.id().to_string(), b))
-            .collect())
+        TaggedCommits::new(self, tags)
     }
 
     /// Returns the remote of the upstream repository.
@@ -649,7 +652,7 @@ fn ssh_path_segments(url: &str) -> Result<Remote> {
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use std::process::Command;
     use std::{env, fs, io, str};
 
@@ -657,6 +660,15 @@ mod test {
 
     use super::*;
     use crate::commit::Commit as AppCommit;
+
+    pub(crate) fn get_repository() -> Result<Repository> {
+        Repository::discover(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .expect("parent directory not found")
+                .to_path_buf(),
+        )
+    }
 
     fn get_last_commit_hash() -> Result<String> {
         Ok(str::from_utf8(
@@ -692,15 +704,6 @@ mod test {
         )?
         .trim()
         .to_string())
-    }
-
-    fn get_repository() -> Result<Repository> {
-        Repository::discover(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .expect("parent directory not found")
-                .to_path_buf(),
-        )
     }
 
     #[test]
@@ -745,7 +748,7 @@ mod test {
     fn get_latest_tag() -> Result<()> {
         let repository = get_repository()?;
         let tags = repository.tags(&None, false, false)?;
-        let latest = tags.last().expect("no tags found").1.name.clone();
+        let latest = tags.last().expect("no tags found").name.clone();
         assert_eq!(get_last_tag()?, latest);
 
         let current = repository.current_tag().expect("a current tag").name;
@@ -780,7 +783,7 @@ mod test {
                 .name,
             "v0.1.0"
         );
-        assert!(!tags.contains_key("4ddef08debfff48117586296e49d5caa0800d1b5"));
+        assert!(!tags.contains_commit("4ddef08debfff48117586296e49d5caa0800d1b5"));
         Ok(())
     }
 
@@ -1052,10 +1055,13 @@ mod test {
             Repository::normalize_pattern(Pattern::new(input).expect("valid pattern"))
         };
 
-        let first_commit = create_commit_with_files(&repo, vec![
-            ("initial.txt", "initial content"),
-            ("dir/initial.txt", "initial content"),
-        ]);
+        let first_commit = create_commit_with_files(
+            &repo,
+            vec![
+                ("initial.txt", "initial content"),
+                ("dir/initial.txt", "initial content"),
+            ],
+        );
 
         {
             let retain = repo.should_retain_commit(
@@ -1066,12 +1072,15 @@ mod test {
             assert!(retain, "include: dir/");
         }
 
-        let commit = create_commit_with_files(&repo, vec![
-            ("file1.txt", "content1"),
-            ("file2.txt", "content2"),
-            ("dir/file3.txt", "content3"),
-            ("dir/subdir/file4.txt", "content4"),
-        ]);
+        let commit = create_commit_with_files(
+            &repo,
+            vec![
+                ("file1.txt", "content1"),
+                ("file2.txt", "content2"),
+                ("dir/file3.txt", "content3"),
+                ("dir/subdir/file4.txt", "content4"),
+            ],
+        );
 
         {
             let retain = repo.should_retain_commit(&commit, None, None);

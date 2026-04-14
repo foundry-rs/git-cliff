@@ -41,6 +41,9 @@ pub mod statistics;
 pub mod summary;
 /// Git tag.
 pub mod tag;
+/// Tagged commits mapping.
+#[cfg(feature = "repo")]
+pub mod tagged;
 /// Template engine.
 pub mod template;
 
