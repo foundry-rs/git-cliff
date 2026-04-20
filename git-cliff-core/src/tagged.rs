@@ -16,7 +16,9 @@ pub struct TaggedCommits<'a> {
     tags: IndexMap<String, Tag>,
     /// List of tags' commit indexes. Points into `commits`.
     ///
-    /// Sorted in reverse order, meaning the first element is the latest tag.
+    /// Sorted in descending order by commit index, meaning the first element
+    /// has the highest index (oldest commit in `commits`, which is ordered
+    /// newest-first).
     ///
     /// Used for lookups.
     tag_indexes: Vec<usize>,
@@ -120,26 +122,32 @@ impl<'a> TaggedCommits<'a> {
     }
 
     /// Inserts a new tagged commit.
-    pub fn insert(&mut self, commit: String, tag: Tag) {
+    ///
+    /// Only inserts if the commit exists in the repository's commit list.
+    /// Returns `true` if the tag was inserted.
+    pub fn insert(&mut self, commit: String, tag: Tag) -> bool {
         if let Some(index) = self.commits.get_index_of(&commit) {
             if let Err(idx) = self.binary_search(index) {
                 self.tag_indexes.insert(idx, index);
             }
+            self.tags.insert(commit, tag);
+            true
+        } else {
+            false
         }
-        self.tags.insert(commit, tag);
     }
 
     /// Retains only the tags specified by the predicate.
     pub fn retain(&mut self, mut f: impl FnMut(&Tag) -> bool) {
+        // Filter the tags map first, then rebuild tag_indexes to stay
+        // consistent.
+        self.tags.retain(|_, tag| f(tag));
         self.tag_indexes.retain(|&idx| {
-            let panic_msg = "invalid TaggedCommits state";
-            let (commit_of_tag, _) = self.commits.get_index(idx).expect(panic_msg);
-            let tag = self.tags.get(commit_of_tag).expect(panic_msg);
-            let retain = f(tag);
-            if !retain {
-                self.tags.shift_remove(commit_of_tag);
-            }
-            retain
+            let (commit_of_tag, _) = self
+                .commits
+                .get_index(idx)
+                .expect("invalid TaggedCommits state");
+            self.tags.contains_key(commit_of_tag)
         });
     }
 
@@ -255,19 +263,34 @@ mod test {
         let mut tc = get_tagged_commits()?;
         let original_len = tc.len();
         let commit_id = tc.commits.keys().next().expect("should have commits").clone();
-        tc.insert(
+        assert!(tc.insert(
             commit_id.clone(),
             Tag {
                 name: "v99.0.0".to_string(),
                 message: None,
             },
-        );
+        ));
         assert_eq!(tc.len(), original_len + 1);
         assert!(tc.contains_commit(&commit_id));
         assert_eq!(
             tc.get(&commit_id).expect("should find inserted tag").name,
             "v99.0.0"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn insert_unknown_commit_is_noop() -> Result<()> {
+        let mut tc = get_tagged_commits()?;
+        let original_len = tc.len();
+        assert!(!tc.insert(
+            "0000000000000000000000000000000000000000".to_string(),
+            Tag {
+                name: "v99.0.0".to_string(),
+                message: None,
+            },
+        ));
+        assert_eq!(tc.len(), original_len);
         Ok(())
     }
 

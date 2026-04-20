@@ -354,9 +354,10 @@ fn process_repository<'a>(
         .last()
         .and_then(|root| tags.get_closest(&root.id().to_string()));
     let mut first_processed_tag = None;
+    let repository_path = repository.root_path()?.to_string_lossy().into_owned();
 
     let fill_release = |release: &mut Release, tag: Option<&Tag>| -> Result<()> {
-        release.repository = Some(repository.path().to_string_lossy().into_owned());
+        release.repository = Some(repository_path.clone());
         let Some(tag) = tag else { return Ok(()) };
         let Some(release_commit) = tags.get_commit(&tag.name) else {
             return Ok(());
@@ -439,7 +440,9 @@ fn process_repository<'a>(
 
         // Set the previous release if the first tag is found.
         if let Some(tag) = first_tag {
-            let commit_id = tags.get_commit(&tag.name).unwrap();
+            let commit_id = tags
+                .get_commit(&tag.name)
+                .expect("tag must have a corresponding commit");
             let previous_release = Release {
                 commit_id: Some(commit_id.to_string()),
                 version: Some(tag.name.clone()),
@@ -490,9 +493,10 @@ fn process_repository<'a>(
 /// Appends `release` to `releases`, also setting the `previous` field and
 /// resetting `release`.
 fn append_release<'a>(releases: &mut Vec<Release<'a>>, release: &mut Release<'a>) {
-    let mut previous = releases.last().cloned().unwrap_or_default();
-    previous.previous = None;
-    release.previous = Some(Box::new(previous));
+    if let Some(mut previous) = releases.last().cloned() {
+        previous.previous = None;
+        release.previous = Some(Box::new(previous));
+    }
     releases.push(std::mem::take(release));
 }
 

@@ -9,6 +9,8 @@ pub struct Tag {
     pub message: Option<String>,
 }
 
+/// Tags are compared by name only. The message is not considered because
+/// tag identity in a repository is determined solely by its name.
 impl PartialEq for Tag {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
