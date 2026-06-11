@@ -1,69 +1,66 @@
 version: 2
 updates:
-  # Maintain dependencies for Cargo
   - package-ecosystem: cargo
-    directory: "/"
+    directory: /
     schedule:
-      interval: monthly
+      interval: weekly
+      day: monday
+      time: 09:00
+      timezone: UTC
     open-pull-requests-limit: 10
     groups:
-      minor:
-        update-types:
-          - "minor"
-      patch:
-        update-types:
-          - "patch"
-
-  # Maintain dependencies for GitHub Actions
+      cargo-weekly:
+        patterns:
+          - '*'
   - package-ecosystem: github-actions
-    directory: "/"
+    directory: /
     schedule:
-      interval: monthly
+      interval: weekly
+      day: monday
+      time: 09:00
+      timezone: UTC
     open-pull-requests-limit: 10
     groups:
-      minor:
-        update-types:
-          - "minor"
-      patch:
-        update-types:
-          - "patch"
-
-  # Maintain dependencies for NPM
-  - package-ecosystem: "npm"
-    directory: "/website"
+      ci-weekly:
+        patterns:
+          - '*'
+  - package-ecosystem: npm
+    directory: /website
     schedule:
-      interval: monthly
+      interval: weekly
+      day: monday
+      time: 09:00
+      timezone: UTC
     open-pull-requests-limit: 10
     groups:
-      minor:
-        update-types:
-          - "minor"
-      patch:
-        update-types:
-          - "patch"
-
+      npm-weekly:
+        patterns:
+          - '*'
   - package-ecosystem: npm
     directory: /npm/git-cliff
     schedule:
-      interval: monthly
+      interval: weekly
+      day: monday
+      time: 09:00
+      timezone: UTC
     open-pull-requests-limit: 10
     groups:
-      minor:
-        update-types:
-          - "minor"
-      patch:
-        update-types:
-          - "patch"
+      npm-weekly:
+        patterns:
+          - '*'
     ignore:
-      # We intentionally ignore semver-major updates to avoid
-      # PR noise when new Node versions are released.
-      # Revisit this when updating the supported Node.js range.
-      - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
-
-  # Maintain dependencies for Docker
+      - dependency-name: '@types/node'
+        update-types:
+          - version-update:semver-major
   - package-ecosystem: docker
     directory: /
     schedule:
-      interval: monthly
+      interval: weekly
+      day: monday
+      time: 09:00
+      timezone: UTC
     open-pull-requests-limit: 10
+    groups:
+      docker-weekly:
+        patterns:
+          - '*'
